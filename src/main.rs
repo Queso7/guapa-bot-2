@@ -1,38 +1,48 @@
 mod commands;
+
 use dotenv::dotenv;
 use std::env;
+use poise::serenity_prelude as serenity;
+use commands::register_commands;
 
-use serenity::async_trait;
-use serenity::model::channel::Message;
-use serenity::model::gateway::Ready;
-use serenity::prelude::*;
-
-use crate::commands::handle_command;
-
-struct Handler;
-
-#[async_trait]
-impl EventHandler for Handler{
-    async fn message(&self, ctx: Context, msg: Message){
-		handle_command(&ctx, &msg).await; 
-    }
-    async fn ready(&self, _: Context, ready: Ready){
-		println!("{}, Connected :3 \nHave it fun", ready.user.name);
-    }
-}
+type Error = Box<dyn std::error::Error + Send + Sync>;
+pub struct Data;
+pub type BotContext<'a> = poise::Context<'a, Data, Error>;
 
 #[tokio::main]
-async fn main(){
-	dotenv().ok();
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the enviroment");
-    let intents = GatewayIntents::GUILD_MESSAGES
-	    | GatewayIntents::DIRECT_MESSAGES
-	    | GatewayIntents::MESSAGE_CONTENT;
+async fn main() {
+    dotenv().ok();
 
-    let mut client =
-	Client::builder(&token, intents).event_handler(Handler).await.expect("Err creating client");
+    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
-    if let Err(why) = client.start().await {
-		println!("Client error: {why:?}");
+    let intents = serenity::GatewayIntents::GUILD_MESSAGES
+        | serenity::GatewayIntents::DIRECT_MESSAGES
+        | serenity::GatewayIntents::MESSAGE_CONTENT
+        | serenity::GatewayIntents::GUILDS;
+
+    let framework = poise::Framework::builder()
+        .options(poise::FrameworkOptions {
+            commands: register_commands(),
+            prefix_options: poise::PrefixFrameworkOptions {
+                prefix: Some("!".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .setup(|ctx, _ready, framework| {
+            Box::pin(async move {
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                Ok(Data)
+            })
+        })
+        .build();
+
+    let mut client = serenity::Client::builder(&token, intents)
+        .framework(framework)
+        .await
+        .expect("Failed to create client");
+
+    if let Err(e) = client.start().await {
+        eprintln!("Client error: {:?}", e);
     }
 }
